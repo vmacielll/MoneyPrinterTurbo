@@ -476,6 +476,19 @@
     "OFox Upstream Vendor Help": "Which upstream vendor serves OFox video generation. BytePlus (international) is the default with a consistent content policy; Volcano Engine is the mainland-China vendor; Auto lets the OFox gateway load-balance across vendors.",
     "OFox Vendor BytePlus": "BytePlus (International, default)",
     "OFox Vendor Volcengine": "Volcano Engine (Mainland China)",
-    "OFox Vendor Auto": "Auto (gateway load balancing)"
+    "OFox Vendor Auto": "Auto (gateway load balancing)",
+    "Manual Pick Per Paragraph": "Manual Pick Per Paragraph",
+    "Manual Pick Per Paragraph Help": "Choose one Pexels video for each script paragraph before generating. Only available with the Pexels source.",
+    "Search Videos Per Paragraph": "Search Videos Per Paragraph",
+    "Searching Videos Per Paragraph": "Searching videos for each paragraph...",
+    "Choose Video For Paragraph": "Choose a video for paragraph {index}",
+    "Please Select a Video For Each Paragraph": "Please select a video for each paragraph before generating.",
+    "Paragraph Term": "Search term for paragraph {index}",
+    "No Videos Found For Term": "No videos found for term: {term}",
+    "Per Paragraph Selection Incomplete": "Complete the per-paragraph video selection to enable generation.",
+    "Refresh Search": "Refresh search",
+    "Paragraph N Label": "Paragraph {index}",
+    "Video Option N": "Video {index}",
+    "Selected Video For Paragraph": "Selected: video {index} ({duration}s)"
   }
 }
