@@ -12,7 +12,7 @@ import time
 import unicodedata
 from contextlib import ExitStack, redirect_stdout
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 from loguru import logger
 import numpy as np
 from moviepy import (
@@ -755,6 +755,7 @@ def combine_videos(
     source_usage: dict[str, int] | None = None,
     source_groups: dict[str, str] | None = None,
     used_video_paths: List[str] | None = None,
+    clip_durations: Optional[List[float]] = None,
 ) -> str:
     audio_clip = AudioFileClip(audio_file)
     try:
@@ -900,8 +901,14 @@ def combine_videos(
                 shuffle_transition = random.choice(transition_funcs)
                 clip = shuffle_transition(clip)
 
-            if clip.duration > max_clip_duration:
-                clip = clip.subclipped(0, max_clip_duration)
+            # aplicar duração-alvo por clipe (modo de seleção manual)
+            target_duration = (
+                clip_durations[i]
+                if clip_durations and i < len(clip_durations)
+                else max_clip_duration
+            )
+            if clip.duration > target_duration:
+                clip = clip.subclipped(0, target_duration)
                 
             # wirte clip to temp file
             clip_file = f"{output_dir}/temp-clip-{i+1}.mp4"
