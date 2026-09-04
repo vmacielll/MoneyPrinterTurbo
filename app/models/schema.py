@@ -101,6 +101,9 @@ class VideoParams(BaseModel):
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
+    selected_materials: Optional[List[MaterialInfo]] = (
+        None  # Parágrafo-a-parágrafo: uma entrada por parágrafo, na ordem
+    )
 
     custom_audio_file: Optional[str] = (
         None  # Custom audio file path, will ignore TTS and can still use Whisper subtitles
