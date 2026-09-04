@@ -648,16 +648,27 @@ def combine_videos(
     processed_clips = []
     subclipped_items = []
     video_duration = 0
-    for video_path in video_paths:
+    for i, video_path in enumerate(video_paths):
         clip = _open_video_clip_quietly(video_path)
         clip_duration = clip.duration
         clip_w, clip_h = clip.size
         close_clip(clip)
         
+        # 手动选材模式:每个源视频精确对应一个段落,片段必须铺满该段落的
+        # 完整时长。不能沿用 max_clip_duration(默认 5s) 预切分,否则段落
+        # 时长会被静默截断成 ~5s。与 source_clip_duration 一致,这里同样
+        # 按播放速度反推源读取时长,使变速后仍能恰好填满 clip_durations[i];
+        # 仍以实际源时长封顶。clip_durations 为 None/空时保持原有行为。
+        per_source_chunk_duration = (
+            clip_durations[i] * normalized_clip_speed
+            if clip_durations is not None and i < len(clip_durations)
+            else source_clip_duration
+        )
+
         start_time = 0
 
         while start_time < clip_duration:
-            end_time = min(start_time + source_clip_duration, clip_duration)
+            end_time = min(start_time + per_source_chunk_duration, clip_duration)
 
             # 保留所有有效分段。
             # 这样既不会丢掉“整段视频本身就短于 max_clip_duration”的素材，
