@@ -135,6 +135,19 @@ ENGLISH_FALLBACK_KEYS = frozenset(
         "VoxCPM Prompt Pair Required",
         "VoxCPM Prompt Invalid",
         "None (Animation)",
+        "Manual Pick Per Paragraph",
+        "Manual Pick Per Paragraph Help",
+        "Search Videos Per Paragraph",
+        "Searching Videos Per Paragraph",
+        "Choose Video For Paragraph",
+        "Please Select a Video For Each Paragraph",
+        "Paragraph Term",
+        "No Videos Found For Term",
+        "Per Paragraph Selection Incomplete",
+        "Refresh Search",
+        "Paragraph N Label",
+        "Video Option N",
+        "Selected Video For Paragraph",
     }
 )
 FORMAT_PLACEHOLDER_PATTERN = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})")

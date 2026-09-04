@@ -561,7 +561,7 @@
     "MuAPI API Key Help": "创建 MuAPI API Key 并妥善保管。MuAPI 按实际提交的任务计费。",
     "MuAPI Base URL": "MuAPI Base URL",
     "MuAPI Base URL Help": "MuAPI 请求使用的 API 根地址，默认值为 https://api.muapi.ai/api/v1。",
-    "MuAPI Video Endpoint": "MuAPI 视频 Endpoint",
+    "MuAPI Video Endpoint": "MuAPI Video Endpoint",
     "MuAPI Video Endpoint Help": "MuAPI Base URL 下的异步文生视频相对路径，例如 seedance-lite-t2v。",
     "MuAPI Resolution": "MuAPI 分辨率",
     "MuAPI Resolution Help": "发送给所选 MuAPI Endpoint 的分辨率。默认预算路由支持 480p、720p 和 1080p。",
@@ -570,6 +570,19 @@
     "MuAPI Billing Notice Without Script": "每段生成视频都会由 MuAPI 计费。填写或生成视频文案后可查看预计任务数量。",
     "Confirm MuAPI Charge": "我已了解 MuAPI 视频生成会创建付费任务",
     "Confirm MuAPI Charge Help": "MuAPI 素材按脚本片段逐段提交，凑够配音所需时长后立即停止。提交状态不明确时不会自动重试，因为远端任务可能已经创建并产生费用。",
-    "Confirm MuAPI Charge Required": "请确认 MuAPI 生成费用后再生成视频。"
+    "Confirm MuAPI Charge Required": "请确认 MuAPI 生成费用后再生成视频。",
+    "Manual Pick Per Paragraph": "逐段手动选视频",
+    "Manual Pick Per Paragraph Help": "在生成前为每个脚本段落选择一个 Pexels 视频。仅在 Pexels 源下可用。",
+    "Search Videos Per Paragraph": "按段落搜索视频",
+    "Searching Videos Per Paragraph": "正在为每个段落搜索视频...",
+    "Choose Video For Paragraph": "为第 {index} 段选择视频",
+    "Please Select a Video For Each Paragraph": "请在生成前为每个段落选择视频。",
+    "Paragraph Term": "第 {index} 段搜索词",
+    "No Videos Found For Term": "未找到关键词对应的视频：{term}",
+    "Per Paragraph Selection Incomplete": "请完成逐段视频选择后再启用生成。",
+    "Refresh Search": "刷新搜索",
+    "Paragraph N Label": "第 {index} 段",
+    "Video Option N": "视频 {index}",
+    "Selected Video For Paragraph": "已选择：视频 {index}（{duration}秒）"
   }
 }

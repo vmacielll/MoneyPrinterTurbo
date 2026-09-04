@@ -570,6 +570,19 @@
     "MuAPI Billing Notice Without Script": "Each generated clip is billed by MuAPI. Enter or generate the video script to see an estimated task count.",
     "Confirm MuAPI Charge": "I understand MuAPI video generation creates paid tasks",
     "Confirm MuAPI Charge Help": "MuAPI clips are submitted one at a time and stop once they cover the voiceover duration. An ambiguous submission is not retried because it may already have created a billable remote task.",
-    "Confirm MuAPI Charge Required": "Please confirm the MuAPI charge before generating the video."
+    "Confirm MuAPI Charge Required": "Please confirm the MuAPI charge before generating the video.",
+    "Manual Pick Per Paragraph": "Manual Pick Per Paragraph",
+    "Manual Pick Per Paragraph Help": "Choose one Pexels video for each script paragraph before generating. Only available with the Pexels source.",
+    "Search Videos Per Paragraph": "Search Videos Per Paragraph",
+    "Searching Videos Per Paragraph": "Searching videos for each paragraph...",
+    "Choose Video For Paragraph": "Choose a video for paragraph {index}",
+    "Please Select a Video For Each Paragraph": "Please select a video for each paragraph before generating.",
+    "Paragraph Term": "Search term for paragraph {index}",
+    "No Videos Found For Term": "No videos found for term: {term}",
+    "Per Paragraph Selection Incomplete": "Complete the per-paragraph video selection to enable generation.",
+    "Refresh Search": "Refresh search",
+    "Paragraph N Label": "Paragraph {index}",
+    "Video Option N": "Video {index}",
+    "Selected Video For Paragraph": "Selected: video {index} ({duration}s)"
   }
 }
