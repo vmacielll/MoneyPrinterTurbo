@@ -1093,6 +1093,40 @@ def save_video(video_url: str, save_dir: str = "") -> str:
     return ""
 
 
+def download_selected_videos(
+    task_id: str,
+    materials: list[MaterialInfo],
+    material_directory: str = "",
+) -> list[str]:
+    """Baixa exatamente as URLs fornecidas, na ordem dada, sem busca."""
+    video_paths: list[str] = []
+    material_sources: list[dict[str, Any]] = []
+    for item in materials:
+        try:
+            saved_video_path = save_video(item.url, material_directory)
+            if saved_video_path:
+                video_paths.append(saved_video_path)
+                try:
+                    material_sources.append(
+                        _material_source_record(item, saved_video_path)
+                    )
+                except Exception as source_error:
+                    logger.warning(
+                        "failed to prepare material source record: "
+                        f"provider={item.provider}, "
+                        f"error={type(source_error).__name__}, detail={source_error}"
+                    )
+        except Exception as e:
+            logger.error(
+                "failed to download selected material video: "
+                f"provider={item.provider}, error={type(e).__name__}, "
+                f"detail={_redact_request_error(e, item.url)}"
+            )
+    logger.success(f"downloaded {len(video_paths)} selected videos")
+    _persist_material_sources(task_id, material_sources)
+    return video_paths
+
+
 # OpenAI 兼容文生图（Issue #1274）通过 /images/generations 协议为脚本关键词
 # 生成图片素材，既可指向本地 ComfyUI/SD 网关，也可用于各类 OpenAI 协议中转
 # 服务。生成的图片立即渲染成与 local 素材同款"缓慢放大"mp4 片段，对下游
