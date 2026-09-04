@@ -24,6 +24,7 @@ from app.services import (
     metaso_minimax,
     muapi,
     ofox,
+    paragraph_timing,
     sonilo,
     subtitle,
     task_artifacts,
@@ -652,6 +653,19 @@ def get_video_materials(
     audio_duration,
     loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
 ):
+    if params.selected_materials and params.video_source == "pexels":
+        logger.info("\n\n## downloading user-selected videos")
+        video_paths = material.download_selected_videos(
+            task_id=task_id,
+            materials=params.selected_materials,
+            material_directory="",
+        )
+        if not video_paths:
+            _mark_task_failed(
+                task_id, "materials", "failed to download selected materials"
+            )
+            return None
+        return video_paths
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
@@ -911,6 +925,17 @@ def generate_final_videos(
         video_concat_mode = VideoConcatMode.random
     video_transition_mode = params.video_transition_mode
 
+    clip_durations = None
+    if params.selected_materials and params.video_script:
+        cues = subtitle.parse_subtitle_cues(subtitle_path)
+        spans = paragraph_timing.paragraph_durations(
+            params.video_script, cues, audio_duration
+        )
+        # combine_videos itera por clipe-base na ordem; mapear 1:1 com as durações
+        clip_durations = [
+            end - start for start, end in spans
+        ]
+
     _progress = 50
     for i in range(params.video_count):
         index = i + 1
@@ -939,6 +964,7 @@ def generate_final_videos(
             threads=params.n_threads,
             clip_speed=params.video_clip_speed,
             **batch_options,
+            clip_durations=clip_durations,
         )
         if allocate_batch_materials:
             selected_sources = list(dict.fromkeys(used_video_paths))
