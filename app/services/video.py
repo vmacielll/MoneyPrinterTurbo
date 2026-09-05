@@ -10,7 +10,7 @@ import tempfile
 import unicodedata
 from contextlib import ExitStack, redirect_stdout
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 from loguru import logger
 import numpy as np
 from moviepy import (
@@ -689,6 +689,7 @@ def combine_videos(
     threads: int = 2,
     clip_speed: float = 1.0,
     video_fit_mode: VideoFitMode = VideoFitMode.cover,
+    clip_durations: Optional[List[float]] = None,
 ) -> str:
     audio_clip = AudioFileClip(audio_file)
     try:
@@ -727,16 +728,38 @@ def combine_videos(
     processed_clips = []
     subclipped_items = []
     video_duration = 0
-    for video_path in video_paths:
+    for i, video_path in enumerate(video_paths):
         clip = _open_video_clip_quietly(video_path)
         clip_duration = clip.duration
         clip_w, clip_h = clip.size
         close_clip(clip)
         
+        # 手动选材模式:每个源视频精确对应一个段落,片段必须铺满该段落的
+        # 完整时长。不能沿用 max_clip_duration(默认 5s) 预切分,否则段落
+        # 时长会被静默截断成 ~5s。与 source_clip_duration 一致,这里同样
+        # 按播放速度反推源读取时长,使变速后仍能恰好填满 clip_durations[i];
+        # 仍以实际源时长封顶。clip_durations 为 None/空时保持原有行为。
+        per_source_chunk_duration = (
+            clip_durations[i] * normalized_clip_speed
+            if clip_durations is not None and i < len(clip_durations)
+            else source_clip_duration
+        )
+        if per_source_chunk_duration <= 0:
+            # Duração-alvo degenerada (temporização de parágrafo zerada) faria
+            # end_time == start_time: o trecho é descartado em silêncio e o par
+            # 1:1 parágrafo↔fonte quebra. Ceder ao chunk padrão mantém presença
+            # e ordem, logando a anomalia.
+            logger.warning(
+                f"clip duration {per_source_chunk_duration:.2f}s for source "
+                f"'{video_path}' is not positive; falling back to "
+                f"{source_clip_duration:.2f}s"
+            )
+            per_source_chunk_duration = source_clip_duration
+
         start_time = 0
 
         while start_time < clip_duration:
-            end_time = min(start_time + source_clip_duration, clip_duration)
+            end_time = min(start_time + per_source_chunk_duration, clip_duration)
 
             # 保留所有有效分段。
             # 这样既不会丢掉“整段视频本身就短于 max_clip_duration”的素材，
@@ -832,8 +855,14 @@ def combine_videos(
                 shuffle_transition = random.choice(transition_funcs)
                 clip = shuffle_transition(clip)
 
-            if clip.duration > max_clip_duration:
-                clip = clip.subclipped(0, max_clip_duration)
+            # aplicar duração-alvo por clipe (modo de seleção manual)
+            target_duration = (
+                clip_durations[i]
+                if clip_durations and i < len(clip_durations)
+                else max_clip_duration
+            )
+            if clip.duration > target_duration:
+                clip = clip.subclipped(0, target_duration)
                 
             # wirte clip to temp file
             clip_file = f"{output_dir}/temp-clip-{i+1}.mp4"

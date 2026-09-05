@@ -41,6 +41,7 @@ Generate a script for a video, depending on the subject of the video.
 6. do not include "voiceover", "narrator" or similar indicators of what should be spoken at the beginning of each paragraph or line.
 7. you must not mention the prompt, or anything about the script itself. also, never talk about the amount of paragraphs or lines. just write the script.
 8. respond in the same language as the video subject.
+9. separate every paragraph from the next with exactly one blank line, and do not use blank lines inside a paragraph or extra blank lines between paragraphs.
 """.strip()
 
 
@@ -464,6 +465,20 @@ def _normalize_script_paragraph_number(paragraph_number: int | None) -> int:
     return value
 
 
+def split_script_paragraphs(script: str) -> List[str]:
+    """Split a script into non-empty paragraphs on one or more blank lines.
+
+    Keeps the same convention the WebUI picker relies on: a single blank line
+    separates paragraphs. Runs of blank/whitespace-only lines (providers often
+    return them) collapse into that single separator, so a mis-formatted script
+    still aligns paragraph <-> subtitle.
+    """
+    if not script:
+        return []
+    collapsed = re.sub(r"(?:\r?\n[ \t]*){2,}", "\n\n", script)
+    return [p.strip() for p in collapsed.split("\n\n") if p.strip()]
+
+
 def build_script_prompt(
     video_subject: str,
     language: str = "",
@@ -542,8 +557,12 @@ def generate_script(
         response = re.sub(r"\[.*?\]", "", response)
         response = re.sub(r"\(.*?\)", "", response)
 
-        # Split the script into paragraphs
-        paragraphs = response.split("\n\n")
+        # Split the script into paragraphs.
+        # Some providers return extra blank lines or whitespace-only lines
+        # between paragraphs. Collapse every run of blank lines into a single
+        # paragraph separator and drop empty segments, so the final script has
+        # exactly one blank line between paragraphs and no empty paragraph.
+        paragraphs = split_script_paragraphs(response)
 
         # Select the specified number of paragraphs
         # selected_paragraphs = paragraphs[:paragraph_number]
@@ -702,6 +721,93 @@ Please note that you must use English for generating video search terms; Chinese
 
     logger.success(f"completed: \n{search_terms}")
     return search_terms
+
+
+def estimate_paragraph_durations(
+    video_script: str,
+    language: str = "",
+    app_config=None,
+) -> List[float]:
+    """Estimate the natural spoken duration (seconds) of each script paragraph.
+
+    Informational only: clip cutting still follows the timing derived from the
+    real TTS narration, so this estimate never drives the cut, it just helps
+    the user budget a scene before generating. Paragraphs are split with the
+    same blank-line convention used by the WebUI picker; the model returns one
+    duration per paragraph in the same order. Returns [] (never raises) when
+    the script is empty or the model output cannot be parsed into exactly one
+    number per paragraph, so the caller can safely hide the preview.
+    """
+    paragraphs = split_script_paragraphs(video_script)
+    if not paragraphs:
+        return []
+    if len(paragraphs) > MAX_SCRIPT_PARAGRAPH_NUMBER:
+        # WebUI/API clamp the count; defensive guard keeps the request small.
+        paragraphs = paragraphs[:MAX_SCRIPT_PARAGRAPH_NUMBER]
+
+    numbered_script = "\n\n".join(
+        f"{index}. {paragraph}" for index, paragraph in enumerate(paragraphs, 1)
+    )
+    prompt = f"""
+# Role: Video Narration Timing Estimator
+
+## Goals:
+Estimate how many seconds a narrator needs to read each paragraph of the
+video script out loud at a natural pace, including short pauses between
+sentences.
+
+## Constrains:
+1. return only a json-array of numbers, one number per paragraph, in the same order as the numbered paragraphs below.
+2. each number is the estimated speaking duration in seconds, with at most one decimal place.
+3. must not return anything other than the json-array. no explanations, markdown, or code fences.
+4. estimate at a natural reading speed{language}.
+
+## Output Example:
+[8.5, 12.0, 6.3]
+
+## Context:
+### Script Paragraphs
+{numbered_script}
+""".strip()
+
+    logger.info(f"estimating paragraph durations: paragraphs={len(paragraphs)}")
+
+    durations: List[float] = []
+    response = ""
+    for attempt in range(_max_retries):
+        try:
+            if app_config is None:
+                response = _generate_response(prompt)
+            else:
+                response = _generate_response(prompt, app_config=app_config)
+            if response.startswith("Error: "):
+                logger.error(f"failed to estimate paragraph durations: {response}")
+                return []
+            match = re.search(r"\[.*]", _strip_code_fence(response), re.DOTALL)
+            if not match:
+                continue
+            values = json.loads(match.group())
+            if not isinstance(values, list) or not all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in values
+            ):
+                logger.error("response is not a list of numbers.")
+                continue
+            parsed = [round(float(value), 1) for value in values]
+            if len(parsed) == len(paragraphs):
+                durations = parsed
+                break
+            # Misaligned model output would pair durations with the wrong
+            # paragraph; drop it instead of guessing.
+            logger.warning(
+                f"paragraph duration count mismatch: got {len(parsed)}, "
+                f"expected {len(paragraphs)}"
+            )
+        except Exception as exc:
+            logger.warning(f"failed to estimate paragraph durations: {exc}")
+
+    logger.success(f"completed: \n{durations}")
+    return durations
 
 
 # =============================================================================

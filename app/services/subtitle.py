@@ -180,6 +180,24 @@ def file_to_subtitles(filename):
     return times_texts
 
 
+def _srt_time_to_seconds(time_str: str) -> float:
+    # formato SRT: HH:MM:SS,mmm  (vírgula separa os milissegundos)
+    hh, mm, rest = time_str.split(":")
+    ss, ms = rest.split(",")
+    return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+
+
+def parse_subtitle_cues(subtitle_path: str) -> list[tuple[float, float, str]]:
+    """Lê um arquivo .srt e devolve as falas ordenadas como (início, fim, texto)."""
+    items = file_to_subtitles(subtitle_path)
+    cues: list[tuple[float, float, str]] = []
+    for _, times_text, text in items:
+        start_str, end_str = times_text.split(" --> ")
+        cues.append((_srt_time_to_seconds(start_str.strip()),
+                     _srt_time_to_seconds(end_str.strip()), text))
+    return cues
+
+
 def levenshtein_distance(s1, s2):
     if len(s1) < len(s2):
         return levenshtein_distance(s2, s1)

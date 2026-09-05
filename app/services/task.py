@@ -22,6 +22,7 @@ from app.services import (
     material,
     metaso_minimax,
     ofox,
+    paragraph_timing,
     sonilo,
     subtitle,
     task_artifacts,
@@ -641,6 +642,23 @@ def get_video_materials(
     audio_duration,
     loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
 ):
+    if params.selected_materials and params.video_source == "pexels":
+        logger.info("\n\n## downloading user-selected videos")
+        video_paths = material.download_selected_videos(
+            task_id=task_id,
+            materials=params.selected_materials,
+            material_directory="",
+        )
+        if len(video_paths) != len(params.selected_materials):
+            # 部分下载失败时跳过缺失项会把后续素材整体前移，破坏 clip_durations
+            # 与片段的 1:1 配对。只要数量不匹配就整体失败，不产出错位成片。
+            _mark_task_failed(
+                task_id,
+                "materials",
+                "failed to download one or more selected materials",
+            )
+            return None
+        return video_paths
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
@@ -846,13 +864,29 @@ def generate_final_videos(
     )
     # 多视频生成默认会打散素材以增加差异；但“按文案顺序匹配素材”追求的是
     # 时间线稳定性和可解释性，所以开启后所有输出都使用顺序拼接。
-    if params.match_materials_to_script:
+    # 手动选材模式下每个源视频必须精确对应一个段落，clip_durations 依赖
+    # 1:1 的段落↔片段顺序，任何打散都会让后续片段拿到错误的段落时长，
+    # 因此该路径无条件强制顺序拼接，且不受 video_count 影响。
+    if params.selected_materials:
+        video_concat_mode = VideoConcatMode.sequential
+    elif params.match_materials_to_script:
         video_concat_mode = VideoConcatMode.sequential
     elif params.video_count == 1:
         video_concat_mode = params.video_concat_mode
     else:
         video_concat_mode = VideoConcatMode.random
     video_transition_mode = params.video_transition_mode
+
+    clip_durations = None
+    if params.selected_materials and params.video_script:
+        cues = subtitle.parse_subtitle_cues(subtitle_path)
+        spans = paragraph_timing.paragraph_durations(
+            params.video_script, cues, audio_duration
+        )
+        # combine_videos itera por clipe-base na ordem; mapear 1:1 com as durações
+        clip_durations = [
+            end - start for start, end in spans
+        ]
 
     _progress = 50
     for i in range(params.video_count):
@@ -872,6 +906,7 @@ def generate_final_videos(
             max_clip_duration=params.video_clip_duration,
             threads=params.n_threads,
             clip_speed=params.video_clip_speed,
+            clip_durations=clip_durations,
         )
 
         _progress += 50 / params.video_count / 2

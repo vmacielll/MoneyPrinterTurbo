@@ -367,6 +367,7 @@ def search_videos_pexels(
                             str(v.get("id")) if v.get("id") is not None else None
                         ),
                         "source_page": _safe_public_url(v.get("url")),
+                        "thumbnail": _safe_public_url(v.get("image")),
                         "creator": _creator_info(v.get("user")),
                         "rendition": {
                             "id": (
@@ -1062,6 +1063,40 @@ def save_video(video_url: str, save_dir: str = "") -> str:
                         f"failed to close video clip: {video_path}, error: {str(close_error)}"
                     )
     return ""
+
+
+def download_selected_videos(
+    task_id: str,
+    materials: list[MaterialInfo],
+    material_directory: str = "",
+) -> list[str]:
+    """Baixa exatamente as URLs fornecidas, na ordem dada, sem busca."""
+    video_paths: list[str] = []
+    material_sources: list[dict[str, Any]] = []
+    for item in materials:
+        try:
+            saved_video_path = save_video(item.url, material_directory)
+            if saved_video_path:
+                video_paths.append(saved_video_path)
+                try:
+                    material_sources.append(
+                        _material_source_record(item, saved_video_path)
+                    )
+                except Exception as source_error:
+                    logger.warning(
+                        "failed to prepare material source record: "
+                        f"provider={item.provider}, "
+                        f"error={type(source_error).__name__}, detail={source_error}"
+                    )
+        except Exception as e:
+            logger.error(
+                "failed to download selected material video: "
+                f"provider={item.provider}, error={type(e).__name__}, "
+                f"detail={_redact_request_error(e, item.url)}"
+            )
+    logger.success(f"downloaded {len(video_paths)} selected videos")
+    _persist_material_sources(task_id, material_sources)
+    return video_paths
 
 
 # OpenAI 兼容文生图（Issue #1274）通过 /images/generations 协议为脚本关键词

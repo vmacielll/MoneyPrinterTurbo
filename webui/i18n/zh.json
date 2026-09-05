@@ -488,6 +488,20 @@
     "OFox Upstream Vendor Help": "OFox 视频生成使用的上游厂商。BytePlus（国际）为默认值，内容政策一致；火山引擎为大陆厂商；自动分发由 OFox 网关按权重在可用厂商间调度。",
     "OFox Vendor BytePlus": "BytePlus（国际，默认）",
     "OFox Vendor Volcengine": "火山引擎（中国大陆）",
-    "OFox Vendor Auto": "自动分发（网关调度）"
+    "OFox Vendor Auto": "自动分发（网关调度）",
+    "Manual Pick Per Paragraph": "逐段手动选视频",
+    "Manual Pick Per Paragraph Help": "在生成前为每个脚本段落选择一个 Pexels 视频。仅在 Pexels 源下可用。",
+    "Search Videos Per Paragraph": "按段落搜索视频",
+    "Searching Videos Per Paragraph": "正在为每个段落搜索视频...",
+    "Choose Video For Paragraph": "为第 {index} 段选择视频",
+    "Please Select a Video For Each Paragraph": "请在生成前为每个段落选择视频。",
+    "Paragraph Term": "第 {index} 段搜索词",
+    "No Videos Found For Term": "未找到关键词对应的视频：{term}",
+    "Per Paragraph Selection Incomplete": "请完成逐段视频选择后再启用生成。",
+    "Refresh Search": "刷新搜索",
+    "Paragraph N Label": "第 {index} 段",
+    "Video Option N": "视频 {index}",
+    "Selected Video For Paragraph": "已选择：视频 {index}（{duration}秒）",
+    "Per Paragraph Script Changed": "脚本自上次搜索后已更改。请重新运行逐段搜索以刷新视频选择。"
   }
 }

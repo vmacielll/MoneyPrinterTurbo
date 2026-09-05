@@ -4245,6 +4245,239 @@ def _render_loomloom_script_generation(params):
     _render_loomloom_candidates()
 
 
+def _split_script_into_paragraphs(script_text):
+    """Split a script into non-empty paragraphs on double newlines."""
+    if not script_text:
+        return []
+    return [p.strip() for p in script_text.split("\n\n") if p.strip()]
+
+
+def _script_stable_hash(script_text):
+    """Return a short stable hash for a script string (used for staleness checks)."""
+    if not script_text:
+        return ""
+    return hashlib.sha256(script_text.encode("utf-8")).hexdigest()[:16]
+
+
+def _search_pexels_for_paragraphs(paragraphs, terms, video_aspect):
+    """Search Pexels for each paragraph term and return per-paragraph options."""
+    results = []
+    aspect_enum = (
+        video_aspect
+        if isinstance(video_aspect, VideoAspect)
+        else VideoAspect(video_aspect)
+    )
+    for paragraph, term in zip(paragraphs, terms):
+        try:
+            options = material.search_videos_pexels(
+                search_term=term,
+                minimum_duration=0,
+                video_aspect=aspect_enum,
+            )
+        except Exception as exc:
+            logger.warning(f"per-paragraph pexels search failed: term={term!r}, {exc}")
+            options = []
+        results.append(
+            {
+                "paragraph": paragraph,
+                "term": term,
+                "options": list(options or []),
+                # No preselection: force the user to curate each paragraph.
+                "chosen_index": -1,
+            }
+        )
+    return results
+
+
+def _render_per_paragraph_selection(params):
+    """Render the per-paragraph video picker and maintain session state."""
+    # Only meaningful for Pexels; bail out silently otherwise.
+    video_source = st.session_state.get(
+        localized_widget_key("video_source_select"), "pexels"
+    )
+    if video_source != "pexels":
+        return
+
+    if st.button(
+        tr("Search Videos Per Paragraph"),
+        key="search_videos_per_paragraph",
+        use_container_width=True,
+        type="secondary",
+        icon=":material/search:",
+    ):
+        paragraphs = _split_script_into_paragraphs(params.video_script)
+        if not paragraphs:
+            st.toast(tr("Please Enter the Video Subject"))
+            st.warning(tr("Please Enter the Video Subject"))
+        else:
+            with st.spinner(tr("Searching Videos Per Paragraph")):
+                terms = _run_llm_read_operation(
+                    "generate_terms_per_paragraph",
+                    lambda app_config_snapshot: llm.generate_terms(
+                        params.video_subject,
+                        params.video_script,
+                        amount=len(paragraphs),
+                        match_script_order=True,
+                        app_config=app_config_snapshot,
+                    ),
+                )
+                # llm.generate_terms returns [] on provider error (never an
+                # "Error: " string), so an empty result means failure.
+                if not terms:
+                    st.error(tr("No Videos Found For Term").format(term=""))
+                else:
+                    # Align terms to paragraphs; pad/truncate to match count.
+                    aligned_terms = list(terms)
+                    while len(aligned_terms) < len(paragraphs):
+                        aligned_terms.append("")
+                    aligned_terms = aligned_terms[: len(paragraphs)]
+                    st.session_state["per_paragraph_selection"] = (
+                        _search_pexels_for_paragraphs(
+                            paragraphs,
+                            aligned_terms,
+                            params.video_aspect,
+                        )
+                    )
+                    # Stamp the script hash so we can detect staleness later.
+                    st.session_state["per_paragraph_script_hash"] = (
+                        _script_stable_hash(params.video_script)
+                    )
+                    # Best-effort AI duration preview per script paragraph.
+                    # Purely informational: the real cut still follows the
+                    # timing derived from the TTS narration, never this estimate.
+                    selection = st.session_state["per_paragraph_selection"]
+                    estimates = []
+                    try:
+                        estimates = _run_llm_read_operation(
+                            "estimate_paragraph_durations",
+                            lambda app_config_snapshot: llm.estimate_paragraph_durations(
+                                params.video_script,
+                                app_config=app_config_snapshot,
+                            ),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"paragraph duration estimate failed: {exc}"
+                        )
+                    if estimates and len(estimates) == len(selection):
+                        for entry, estimate in zip(selection, estimates):
+                            entry["estimated_duration"] = estimate
+                        st.session_state["per_paragraph_selection"] = selection
+
+    selection = st.session_state.get("per_paragraph_selection") or []
+    if not selection:
+        return
+
+    # Render each paragraph's picker.
+    for idx, entry in enumerate(selection):
+        paragraph_label = tr("Paragraph N Label").format(index=idx + 1)
+        with st.container(key=f"per_paragraph_{idx}"):
+            st.markdown(f"**{paragraph_label}**")
+            st.caption(entry["paragraph"][:200])
+
+            # AI-estimated narration duration for this paragraph (informative).
+            if isinstance(entry.get("estimated_duration"), (int, float)):
+                st.caption(
+                    tr("Estimated Paragraph Duration").format(
+                        duration=round(float(entry["estimated_duration"]), 1)
+                    )
+                )
+
+            # Editable term; re-search on demand.
+            current_term = st.text_input(
+                tr("Paragraph Term").format(index=idx + 1),
+                value=entry["term"],
+                key=f"per_paragraph_term_{idx}",
+                label_visibility="collapsed",
+            )
+            term_changed = current_term != entry["term"]
+            col_refresh, _ = st.columns([1, 4])
+            if col_refresh.button(
+                tr("Refresh Search"),
+                key=f"per_paragraph_refresh_{idx}",
+                icon=":material/refresh:",
+            ):
+                try:
+                    _aspect_enum = (
+                        params.video_aspect
+                        if isinstance(params.video_aspect, VideoAspect)
+                        else VideoAspect(params.video_aspect)
+                    )
+                    fresh = material.search_videos_pexels(
+                        search_term=current_term,
+                        minimum_duration=0,
+                        video_aspect=_aspect_enum,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"per-paragraph pexels refresh failed: term={current_term!r}, {exc}"
+                    )
+                    fresh = []
+                entry["term"] = current_term
+                entry["options"] = list(fresh or [])
+                # Force the user to re-pick after a refresh; no auto-selection.
+                entry["chosen_index"] = -1
+                st.session_state["per_paragraph_selection"] = selection
+                st.rerun()
+            elif term_changed:
+                # Update term in state but do not auto-search; user clicks refresh.
+                entry["term"] = current_term
+                st.session_state["per_paragraph_selection"] = selection
+
+            options = entry["options"]
+            if not options:
+                st.warning(
+                    tr("No Videos Found For Term").format(term=entry["term"])
+                )
+                entry["chosen_index"] = -1
+                st.session_state["per_paragraph_selection"] = selection
+                continue
+
+            # Clickable thumbnail cards: one card per option, with the video
+            # duration printed right under the thumbnail and a full-width
+            # select button acting as the card's action. Native Streamlit has
+            # no stable image-click widget, so the button is the interactive
+            # (and harness-testable) way to pick an option; the selected card
+            # shows a checkmark badge and turns into a primary button.
+            cols_per_row = 4
+            for row_start in range(0, len(options), cols_per_row):
+                row_options = options[row_start : row_start + cols_per_row]
+                card_cols = st.columns(len(row_options))
+                for col, opt_index, option in zip(
+                    card_cols,
+                    range(row_start, row_start + len(row_options)),
+                    row_options,
+                ):
+                    is_chosen = opt_index == entry.get("chosen_index")
+                    with col:
+                        thumbnail = (option.source_info or {}).get("thumbnail")
+                        if thumbnail:
+                            st.image(thumbnail, use_container_width=True)
+                        st.caption(tr("Video Duration").format(duration=option.duration))
+                        if is_chosen:
+                            st.caption(
+                                tr("Selected Video For Paragraph").format(
+                                    index=opt_index + 1,
+                                    duration=option.duration,
+                                )
+                            )
+                        if st.button(
+                            (
+                                tr("Video Selected Button")
+                                if is_chosen
+                                else tr("Select Video For Paragraph")
+                            ),
+                            key=f"per_paragraph_pick_{idx}_{opt_index}",
+                            use_container_width=True,
+                            type="primary" if is_chosen else "secondary",
+                            icon=":material/check_circle:" if is_chosen else None,
+                        ):
+                            entry["chosen_index"] = opt_index
+                            st.session_state["per_paragraph_selection"] = selection
+
+            st.session_state["per_paragraph_selection"] = selection
+
+
 def _render_script_settings(panel, params):
     """渲染文案设置并更新生成参数。"""
     with panel:
@@ -4433,6 +4666,27 @@ def _render_script_settings(panel, params):
                 help=tr("Video Keywords Help"),
                 key="video_terms",
             )
+
+            # Per-paragraph manual video selection (Pexels only).
+            # video_source is set later in _render_video_settings, so we read the
+            # current selectbox value from session_state to decide visibility.
+            # The selectbox stores its value under a localized key (e.g.
+            # "video_source_select_en"), so we must mirror that key shape here.
+            _current_video_source = st.session_state.get(
+                localized_widget_key("video_source_select"), "pexels"
+            )
+            _is_pexels = _current_video_source == "pexels"
+            # Always render the checkbox (disabled when not Pexels) so its widget
+            # state persists across reruns and source switches; this avoids
+            # KeyError in the test harness when the widget disappears.
+            st.checkbox(
+                tr("Manual Pick Per Paragraph"),
+                help=tr("Manual Pick Per Paragraph Help"),
+                key="manual_pick_per_paragraph",
+                disabled=not _is_pexels,
+            )
+            if _is_pexels and st.session_state.get("manual_pick_per_paragraph", False):
+                _render_per_paragraph_selection(params)
 
 
 def _render_video_settings(panel, params):
@@ -6627,12 +6881,53 @@ def _render_generation_controls(
 
     _render_settings_transfer(params)
 
+    # Gate generation when per-paragraph manual pick is active.
+    _manual_pick_active = (
+        params.video_source == "pexels"
+        and st.session_state.get("manual_pick_per_paragraph", False)
+    )
+    _per_paragraph_selection = st.session_state.get("per_paragraph_selection") or []
+    _per_paragraph_complete = False
+    if _manual_pick_active:
+        # F2: detect stale selection when the script changed after searching.
+        _stored_script_hash = st.session_state.get("per_paragraph_script_hash", "")
+        _current_script_hash = _script_stable_hash(params.video_script)
+        if _per_paragraph_selection and _stored_script_hash != _current_script_hash:
+            st.warning(tr("Per Paragraph Script Changed"))
+        elif not _per_paragraph_selection:
+            st.warning(tr("Per Paragraph Selection Incomplete"))
+        else:
+            _missing = [
+                idx + 1
+                for idx, entry in enumerate(_per_paragraph_selection)
+                # F4: guard against None or non-int chosen_index (treat as "not chosen").
+                if not isinstance(entry.get("chosen_index"), int)
+                or entry["chosen_index"] < 0
+                or entry["chosen_index"] >= len(entry.get("options") or [])
+            ]
+            if _missing:
+                st.warning(tr("Please Select a Video For Each Paragraph"))
+            else:
+                _per_paragraph_complete = True
+                # Build selected_materials in paragraph order.
+                _selected = []
+                for entry in _per_paragraph_selection:
+                    _chosen = entry["options"][entry["chosen_index"]]
+                    _m = MaterialInfo()
+                    _m.provider = "pexels"
+                    _m.url = _chosen.url
+                    _m.duration = _chosen.duration
+                    _m.source_info = _chosen.source_info
+                    _selected.append(_m)
+                params.selected_materials = _selected
+
     start_button = st.button(
         tr("Generate Video"),
         use_container_width=True,
         type="primary",
         key="generate_video_button",
         on_click=_prepare_generation_task,
+        disabled=(_manual_pick_active and not _per_paragraph_complete),
     )
     render_onboarding_tour()
     if start_button:
