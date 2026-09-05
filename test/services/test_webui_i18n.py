@@ -87,6 +87,7 @@ ENGLISH_FALLBACK_KEYS = frozenset(
         "Paragraph N Label",
         "Video Option N",
         "Selected Video For Paragraph",
+        "Per Paragraph Script Changed",
     }
 )
 FORMAT_PLACEHOLDER_PATTERN = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})")

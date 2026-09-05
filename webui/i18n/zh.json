@@ -489,6 +489,7 @@
     "Refresh Search": "刷新搜索",
     "Paragraph N Label": "第 {index} 段",
     "Video Option N": "视频 {index}",
-    "Selected Video For Paragraph": "已选择：视频 {index}（{duration}秒）"
+    "Selected Video For Paragraph": "已选择：视频 {index}（{duration}秒）",
+    "Per Paragraph Script Changed": "脚本自上次搜索后已更改。请重新运行逐段搜索以刷新视频选择。"
   }
 }
