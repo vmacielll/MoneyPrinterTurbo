@@ -583,6 +583,7 @@
     "Refresh Search": "Refresh search",
     "Paragraph N Label": "Paragraph {index}",
     "Video Option N": "Video {index}",
-    "Selected Video For Paragraph": "Selected: video {index} ({duration}s)"
+    "Selected Video For Paragraph": "Selected: video {index} ({duration}s)",
+    "Per Paragraph Script Changed": "The script has changed since the last search. Please re-run the per-paragraph search to refresh video selections."
   }
 }

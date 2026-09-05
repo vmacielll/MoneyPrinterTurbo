@@ -4888,6 +4888,13 @@ def _split_script_into_paragraphs(script_text):
     return [p.strip() for p in script_text.split("\n\n") if p.strip()]
 
 
+def _script_stable_hash(script_text):
+    """Return a short stable hash for a script string (used for staleness checks)."""
+    if not script_text:
+        return ""
+    return hashlib.sha256(script_text.encode("utf-8")).hexdigest()[:16]
+
+
 def _search_pexels_for_paragraphs(paragraphs, terms, video_aspect):
     """Search Pexels for each paragraph term and return per-paragraph options."""
     results = []
@@ -4911,7 +4918,8 @@ def _search_pexels_for_paragraphs(paragraphs, terms, video_aspect):
                 "paragraph": paragraph,
                 "term": term,
                 "options": list(options or []),
-                "chosen_index": 0 if options else -1,
+                # No preselection: force the user to curate each paragraph.
+                "chosen_index": -1,
             }
         )
     return results
@@ -4920,7 +4928,9 @@ def _search_pexels_for_paragraphs(paragraphs, terms, video_aspect):
 def _render_per_paragraph_selection(params):
     """Render the per-paragraph video picker and maintain session state."""
     # Only meaningful for Pexels; bail out silently otherwise.
-    video_source = st.session_state.get("video_source_select", "pexels")
+    video_source = st.session_state.get(
+        localized_widget_key("video_source_select"), "pexels"
+    )
     if video_source != "pexels":
         return
 
@@ -4947,11 +4957,13 @@ def _render_per_paragraph_selection(params):
                         app_config=app_config_snapshot,
                     ),
                 )
-                if isinstance(terms, str) and terms.startswith("Error: "):
-                    st.error(tr(terms))
+                # llm.generate_terms returns [] on provider error (never an
+                # "Error: " string), so an empty result means failure.
+                if not terms:
+                    st.error(tr("No Videos Found For Term").format(term=""))
                 else:
                     # Align terms to paragraphs; pad/truncate to match count.
-                    aligned_terms = list(terms or [])
+                    aligned_terms = list(terms)
                     while len(aligned_terms) < len(paragraphs):
                         aligned_terms.append("")
                     aligned_terms = aligned_terms[: len(paragraphs)]
@@ -4961,6 +4973,10 @@ def _render_per_paragraph_selection(params):
                             aligned_terms,
                             params.video_aspect,
                         )
+                    )
+                    # Stamp the script hash so we can detect staleness later.
+                    st.session_state["per_paragraph_script_hash"] = (
+                        _script_stable_hash(params.video_script)
                     )
 
     selection = st.session_state.get("per_paragraph_selection") or []
@@ -5006,7 +5022,8 @@ def _render_per_paragraph_selection(params):
                     fresh = []
                 entry["term"] = current_term
                 entry["options"] = list(fresh or [])
-                entry["chosen_index"] = 0 if fresh else -1
+                # Force the user to re-pick after a refresh; no auto-selection.
+                entry["chosen_index"] = -1
                 st.session_state["per_paragraph_selection"] = selection
                 st.rerun()
             elif term_changed:
@@ -5028,6 +5045,13 @@ def _render_per_paragraph_selection(params):
             option_labels = [
                 tr("Video Option N").format(index=i + 1) for i in range(len(options))
             ]
+            # Use index=None when nothing has been chosen yet so the radio
+            # starts empty and forces the user to make an explicit pick.
+            _stored = entry.get("chosen_index", -1)
+            _radio_default = (
+                _stored if isinstance(_stored, int) and 0 <= _stored < len(options)
+                else None
+            )
             radio_index = st.radio(
                 tr("Choose Video For Paragraph").format(index=idx + 1),
                 options=list(range(len(options))),
@@ -5035,12 +5059,11 @@ def _render_per_paragraph_selection(params):
                     f"{_labels[i]} — {_opts[i].duration}s"
                 ),
                 key=f"per_paragraph_radio_{idx}",
-                index=entry["chosen_index"]
-                if 0 <= entry["chosen_index"] < len(options)
-                else 0,
+                index=_radio_default,
                 label_visibility="collapsed",
             )
-            entry["chosen_index"] = radio_index
+            # radio_index is None until the user picks; treat None as "not chosen".
+            entry["chosen_index"] = radio_index if radio_index is not None else -1
 
             # Render thumbnails in rows.
             for row_start in range(0, len(options), cols_per_row):
@@ -5264,17 +5287,23 @@ def _render_script_settings(panel, params):
             # Per-paragraph manual video selection (Pexels only).
             # video_source is set later in _render_video_settings, so we read the
             # current selectbox value from session_state to decide visibility.
+            # The selectbox stores its value under a localized key (e.g.
+            # "video_source_select_en"), so we must mirror that key shape here.
             _current_video_source = st.session_state.get(
-                "video_source_select", "pexels"
+                localized_widget_key("video_source_select"), "pexels"
             )
-            if _current_video_source == "pexels":
-                st.checkbox(
-                    tr("Manual Pick Per Paragraph"),
-                    help=tr("Manual Pick Per Paragraph Help"),
-                    key="manual_pick_per_paragraph",
-                )
-                if st.session_state.get("manual_pick_per_paragraph", False):
-                    _render_per_paragraph_selection(params)
+            _is_pexels = _current_video_source == "pexels"
+            # Always render the checkbox (disabled when not Pexels) so its widget
+            # state persists across reruns and source switches; this avoids
+            # KeyError in the test harness when the widget disappears.
+            st.checkbox(
+                tr("Manual Pick Per Paragraph"),
+                help=tr("Manual Pick Per Paragraph Help"),
+                key="manual_pick_per_paragraph",
+                disabled=not _is_pexels,
+            )
+            if _is_pexels and st.session_state.get("manual_pick_per_paragraph", False):
+                _render_per_paragraph_selection(params)
 
 
 def _render_video_settings(panel, params):
@@ -8032,14 +8061,21 @@ def _render_generation_controls(
     _per_paragraph_selection = st.session_state.get("per_paragraph_selection") or []
     _per_paragraph_complete = False
     if _manual_pick_active:
-        if not _per_paragraph_selection:
+        # F2: detect stale selection when the script changed after searching.
+        _stored_script_hash = st.session_state.get("per_paragraph_script_hash", "")
+        _current_script_hash = _script_stable_hash(params.video_script)
+        if _per_paragraph_selection and _stored_script_hash != _current_script_hash:
+            st.warning(tr("Per Paragraph Script Changed"))
+        elif not _per_paragraph_selection:
             st.warning(tr("Per Paragraph Selection Incomplete"))
         else:
             _missing = [
                 idx + 1
                 for idx, entry in enumerate(_per_paragraph_selection)
-                if entry.get("chosen_index", -1) < 0
-                or entry.get("chosen_index", -1) >= len(entry.get("options") or [])
+                # F4: guard against None or non-int chosen_index (treat as "not chosen").
+                if not isinstance(entry.get("chosen_index"), int)
+                or entry["chosen_index"] < 0
+                or entry["chosen_index"] >= len(entry.get("options") or [])
             ]
             if _missing:
                 st.warning(tr("Please Select a Video For Each Paragraph"))
