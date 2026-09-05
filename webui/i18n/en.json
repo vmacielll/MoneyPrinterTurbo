@@ -584,6 +584,10 @@
     "Paragraph N Label": "Paragraph {index}",
     "Video Option N": "Video {index}",
     "Selected Video For Paragraph": "Selected: video {index} ({duration}s)",
+    "Select Video For Paragraph": "Select",
+    "Video Selected Button": "✓ Selected",
+    "Video Duration": "{duration}s",
+    "Estimated Paragraph Duration": "≈ {duration}s estimated",
     "Per Paragraph Script Changed": "The script has changed since the last search. Please re-run the per-paragraph search to refresh video selections."
   }
 }

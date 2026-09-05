@@ -248,6 +248,95 @@ class TestScriptPromptOptions(unittest.TestCase):
                 video_script_prompt="x" * (llm.MAX_SCRIPT_PROMPT_LENGTH + 1),
             )
 
+    def test_generate_script_normalizes_paragraph_blank_lines(self):
+        """
+        O resultado deve sempre ter exatamente uma linha em branco entre
+        parágrafos: sem linhas em branco repetidas e sem parágrafo vazio,
+        para o alinhamento parágrafo↔legenda funcionar.
+        """
+        captured = {}
+
+        def fake_generate_response(prompt):
+            captured["prompt"] = prompt
+            return "Para 1\n\n\n   \nPara 2\nmarkdown *"
+
+        with patch.object(
+            llm, "_generate_response", side_effect=fake_generate_response
+        ):
+            result = llm.generate_script(
+                video_subject="example", language="en-US", paragraph_number=2
+            )
+
+        self.assertNotIn("Para 1\n\n\n", result)
+        self.assertEqual(result, "Para 1\n\nPara 2\nmarkdown")
+
+    def test_generate_script_prompt_instructs_blank_line_separation(self):
+        """O prompt de roteiro instrui parágrafos separados por linha em branco."""
+        captured = {}
+
+        def fake_generate_response(prompt):
+            captured["prompt"] = prompt
+            return "A\n\nB"
+
+        with patch.object(
+            llm, "_generate_response", side_effect=fake_generate_response
+        ):
+            llm.generate_script(video_subject="example", language="en-US")
+
+        self.assertIn("blank line", captured["prompt"])
+        self.assertIn("paragraph", captured["prompt"])
+
+    def test_estimate_paragraph_durations_returns_clean_number_list(self):
+        """A estimativa retorna uma duração por parágrafo, na ordem do roteiro."""
+        captured = {}
+
+        def fake_generate_response(prompt):
+            captured["prompt"] = prompt
+            return "[3.2, 4.0, 5.65]"
+
+        with patch.object(
+            llm, "_generate_response", side_effect=fake_generate_response
+        ):
+            result = llm.estimate_paragraph_durations(
+                "First.\n\nSecond.\n\nThird.", language="en-US"
+            )
+
+        self.assertEqual(result, [3.2, 4.0, 5.7])
+        self.assertIn("numbered paragraphs", captured["prompt"])
+
+    def test_estimate_paragraph_durations_returns_empty_on_provider_error(self):
+        """Erro de provider mantém o contrato List[float]: nunca dispara exceção."""
+        with patch.object(
+            llm,
+            "_generate_response",
+            return_value="Error: invalid API key",
+        ):
+            result = llm.estimate_paragraph_durations("First.\n\nSecond.")
+
+        self.assertEqual(result, [])
+
+    def test_estimate_paragraph_durations_returns_empty_on_misaligned_output(self):
+        """Contagem diferente do número de parágrafos não pode parear durações erradas."""
+        with patch.object(
+            llm,
+            "_generate_response",
+            return_value="[3.0, 9.0]",  # 2 valores para 3 parágrafos
+        ):
+            self.assertEqual(
+                llm.estimate_paragraph_durations("One.\n\nTwo.\n\nThree."),
+                [],
+            )
+
+    def test_estimate_paragraph_durations_returns_empty_for_empty_script(self):
+        """Roteiro vazio não deve sequer chamar o modelo."""
+        with patch.object(
+            llm, "_generate_response", return_value="[]"
+        ) as mocked:
+            result = llm.estimate_paragraph_durations("   ")
+
+        self.assertEqual(result, [])
+        mocked.assert_not_called()
+
 
 class TestLLMConnection(unittest.TestCase):
     def test_connection_sends_one_minimal_request(self):

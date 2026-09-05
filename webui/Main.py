@@ -4978,6 +4978,27 @@ def _render_per_paragraph_selection(params):
                     st.session_state["per_paragraph_script_hash"] = (
                         _script_stable_hash(params.video_script)
                     )
+                    # Best-effort AI duration preview per script paragraph.
+                    # Purely informational: the real cut still follows the
+                    # timing derived from the TTS narration, never this estimate.
+                    selection = st.session_state["per_paragraph_selection"]
+                    estimates = []
+                    try:
+                        estimates = _run_llm_read_operation(
+                            "estimate_paragraph_durations",
+                            lambda app_config_snapshot: llm.estimate_paragraph_durations(
+                                params.video_script,
+                                app_config=app_config_snapshot,
+                            ),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"paragraph duration estimate failed: {exc}"
+                        )
+                    if estimates and len(estimates) == len(selection):
+                        for entry, estimate in zip(selection, estimates):
+                            entry["estimated_duration"] = estimate
+                        st.session_state["per_paragraph_selection"] = selection
 
     selection = st.session_state.get("per_paragraph_selection") or []
     if not selection:
@@ -4989,6 +5010,14 @@ def _render_per_paragraph_selection(params):
         with st.container(key=f"per_paragraph_{idx}"):
             st.markdown(f"**{paragraph_label}**")
             st.caption(entry["paragraph"][:200])
+
+            # AI-estimated narration duration for this paragraph (informative).
+            if isinstance(entry.get("estimated_duration"), (int, float)):
+                st.caption(
+                    tr("Estimated Paragraph Duration").format(
+                        duration=round(float(entry["estimated_duration"]), 1)
+                    )
+                )
 
             # Editable term; re-search on demand.
             current_term = st.text_input(
@@ -5040,45 +5069,27 @@ def _render_per_paragraph_selection(params):
                 st.session_state["per_paragraph_selection"] = selection
                 continue
 
-            # Thumbnail grid: show up to 4 columns per row.
+            # Clickable thumbnail cards: one card per option, with the video
+            # duration printed right under the thumbnail and a full-width
+            # select button acting as the card's action. Native Streamlit has
+            # no stable image-click widget, so the button is the interactive
+            # (and harness-testable) way to pick an option; the selected card
+            # shows a checkmark badge and turns into a primary button.
             cols_per_row = 4
-            option_labels = [
-                tr("Video Option N").format(index=i + 1) for i in range(len(options))
-            ]
-            # Use index=None when nothing has been chosen yet so the radio
-            # starts empty and forces the user to make an explicit pick.
-            _stored = entry.get("chosen_index", -1)
-            _radio_default = (
-                _stored if isinstance(_stored, int) and 0 <= _stored < len(options)
-                else None
-            )
-            radio_index = st.radio(
-                tr("Choose Video For Paragraph").format(index=idx + 1),
-                options=list(range(len(options))),
-                format_func=lambda i, _labels=option_labels, _opts=options: (
-                    f"{_labels[i]} — {_opts[i].duration}s"
-                ),
-                key=f"per_paragraph_radio_{idx}",
-                index=_radio_default,
-                label_visibility="collapsed",
-            )
-            # radio_index is None until the user picks; treat None as "not chosen".
-            entry["chosen_index"] = radio_index if radio_index is not None else -1
-
-            # Render thumbnails in rows.
             for row_start in range(0, len(options), cols_per_row):
                 row_options = options[row_start : row_start + cols_per_row]
-                thumb_cols = st.columns(len(row_options))
+                card_cols = st.columns(len(row_options))
                 for col, opt_index, option in zip(
-                    thumb_cols,
+                    card_cols,
                     range(row_start, row_start + len(row_options)),
                     row_options,
                 ):
-                    thumbnail = (option.source_info or {}).get("thumbnail")
+                    is_chosen = opt_index == entry.get("chosen_index")
                     with col:
+                        thumbnail = (option.source_info or {}).get("thumbnail")
                         if thumbnail:
                             st.image(thumbnail, use_container_width=True)
-                        is_chosen = opt_index == radio_index
+                        st.caption(tr("Video Duration").format(duration=option.duration))
                         if is_chosen:
                             st.caption(
                                 tr("Selected Video For Paragraph").format(
@@ -5086,6 +5097,19 @@ def _render_per_paragraph_selection(params):
                                     duration=option.duration,
                                 )
                             )
+                        if st.button(
+                            (
+                                tr("Video Selected Button")
+                                if is_chosen
+                                else tr("Select Video For Paragraph")
+                            ),
+                            key=f"per_paragraph_pick_{idx}_{opt_index}",
+                            use_container_width=True,
+                            type="primary" if is_chosen else "secondary",
+                            icon=":material/check_circle:" if is_chosen else None,
+                        ):
+                            entry["chosen_index"] = opt_index
+                            st.session_state["per_paragraph_selection"] = selection
 
             st.session_state["per_paragraph_selection"] = selection
 
