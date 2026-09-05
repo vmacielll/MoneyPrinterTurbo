@@ -810,6 +810,17 @@ def combine_videos(
             if clip_durations is not None and i < len(clip_durations)
             else source_clip_duration
         )
+        if per_source_chunk_duration <= 0:
+            # Duração-alvo degenerada (temporização de parágrafo zerada) faria
+            # end_time == start_time: o trecho é descartado em silêncio e o par
+            # 1:1 parágrafo↔fonte quebra. Ceder ao chunk padrão mantém presença
+            # e ordem, logando a anomalia.
+            logger.warning(
+                f"clip duration {per_source_chunk_duration:.2f}s for source "
+                f"'{video_path}' is not positive; falling back to "
+                f"{source_clip_duration:.2f}s"
+            )
+            per_source_chunk_duration = source_clip_duration
 
         start_time = 0
 

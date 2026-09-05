@@ -8,6 +8,31 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", normalized.lower())
 
 
+def _speech_weight(text: str) -> int:
+    normalized_len = len(_normalize(text))
+    if normalized_len > 0:
+        return normalized_len
+    # _normalize remove texto não-latino (ex.: CJK) por completo; usar a
+    # contagem bruta de caracteres não-espaço como proxy de fala para que o
+    # parágrafo não ganhe peso zero (e consequentemente duração zero).
+    return len(re.sub(r"\s+", "", text))
+
+
+def _proportional_spans(
+    paragraphs: list[str], audio_duration: float
+) -> list[tuple[float, float]]:
+    weights = [_speech_weight(p) for p in paragraphs]
+    total = sum(weights) or 1
+    spans = []
+    cursor = 0.0
+    for weight, paragraph in zip(weights, paragraphs):
+        share = weight / total * audio_duration
+        spans.append((cursor, cursor + share))
+        cursor += share
+    spans[-1] = (spans[-1][0], audio_duration)
+    return spans
+
+
 def paragraph_durations(
     script: str,
     cues: list[tuple[float, float, str]],
@@ -19,19 +44,15 @@ def paragraph_durations(
 
     # Fallback: sem legendas, distribuir proporcionalmente ao tamanho.
     if not cues:
-        total_chars = sum(len(_normalize(p)) for p in paragraphs) or 1
-        spans = []
-        cursor = 0.0
-        for p in paragraphs:
-            share = len(_normalize(p)) / total_chars * audio_duration
-            spans.append((cursor, cursor + share))
-            cursor += share
-        spans[-1] = (spans[-1][0], audio_duration)
-        return spans
+        return _proportional_spans(paragraphs, audio_duration)
 
-    # Alinhamento por cume de caracteres: cada parágrafo corresponde a um
-    # intervalo contíguo de falas, na ordem de leitura.
     paragraph_norm = [_normalize(p) for p in paragraphs]
+    # Texto não-latino puro (ex.: CJK) zera na normalização; o alinhamento por
+    # cume de caracteres fica indefinido (todos os limites em 0), espremendo
+    # todos os parágrafos nos primeiros trechos do áudio. Degradar para a
+    # distribuição proporcional ao invés de produzir spans degenerados.
+    if any(len(pn) == 0 for pn in paragraph_norm):
+        return _proportional_spans(paragraphs, audio_duration)
     para_ends = []
     acc = 0
     for pn in paragraph_norm:
