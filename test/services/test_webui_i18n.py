@@ -87,6 +87,10 @@ ENGLISH_FALLBACK_KEYS = frozenset(
         "Paragraph N Label",
         "Video Option N",
         "Selected Video For Paragraph",
+        "Select Video For Paragraph",
+        "Video Selected Button",
+        "Video Duration",
+        "Estimated Paragraph Duration",
         "Per Paragraph Script Changed",
     }
 )
