@@ -29,6 +29,10 @@ class _FakePexelsOption:
     def __init__(self, duration, url="https://example.invalid/video.mp4"):
         self.duration = duration
         self.url = url
+        # material_type is read by _render_generation_controls when copying
+        # the chosen option into params.selected_materials; default to video
+        # so the existing video-only test path stays green.
+        self.material_type = "video"
         self.source_info = {"thumbnail": ""}
 
 

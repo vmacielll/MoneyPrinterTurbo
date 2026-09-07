@@ -654,7 +654,10 @@ def get_video_materials(
                 spans = paragraph_timing.paragraph_durations(
                     params.video_script, cues, audio_duration
                 )
-                clip_durations = [max(1, int(round(end - start))) for start, end in spans]
+                # Mantém floats alinhados com o combine phase (linha 917). O renderer
+                # de imagem aceita floats; valores menores que 0.1s são elevados para
+                # evitar clipe vazio que o MoviePy descartaria.
+                clip_durations = [max(0.1, float(end - start)) for start, end in spans]
             except Exception as exc:
                 logger.warning(
                     f"failed to derive paragraph durations for selected materials: "
@@ -909,7 +912,19 @@ def generate_final_videos(
 
     clip_durations = None
     if params.selected_materials and params.video_script:
-        cues = subtitle.parse_subtitle_cues(subtitle_path)
+        # parse_subtitle_cues abre o arquivo internamente; se o provider de
+        # legenda falhou (e o arquivo não foi gerado) queremos cair no caminho
+        # "sem durações" silenciosamente em vez de quebrar o combine.
+        try:
+            cues = subtitle.parse_subtitle_cues(subtitle_path)
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning(
+                "subtitle file unavailable during combine phase; selected "
+                "materials without per-paragraph durations will use their "
+                f"natural length: subtitle_path={subtitle_path}, "
+                f"error={type(exc).__name__}, detail={exc}"
+            )
+            cues = []
         spans = paragraph_timing.paragraph_durations(
             params.video_script, cues, audio_duration
         )

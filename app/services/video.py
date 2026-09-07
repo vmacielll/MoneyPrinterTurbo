@@ -1388,7 +1388,7 @@ def generate_video(
         return bgm_mix_succeeded
 
 
-def render_image_zoom_video(image_path: str, clip_duration: int = 5) -> str:
+def render_image_zoom_video(image_path: str, clip_duration: float = 5) -> str:
     """
     将单张本地图片渲染为带缓慢放大效果的 mp4 片段，返回输出文件路径。
 
