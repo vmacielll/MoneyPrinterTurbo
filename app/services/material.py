@@ -14,6 +14,7 @@ import requests
 from loguru import logger
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from PIL import Image, UnidentifiedImageError
+from PIL.Image import DecompressionBombError
 
 from app.config import config
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
@@ -1287,7 +1288,8 @@ def _download_image_file(url: str, material_directory: str = "") -> str | None:
         content = getattr(response, "content", b"")
         if not content:
             logger.warning(
-                f"image material download returned an empty body: url={url}"
+                f"image material download returned an empty body: "
+                f"url={_safe_public_url(url)}"
             )
             return None
     except Exception as e:
@@ -1302,10 +1304,16 @@ def _download_image_file(url: str, material_directory: str = "") -> str | None:
     try:
         with Image.open(io.BytesIO(content)) as image:
             image.load()
-    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as exc:
+    except (
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        ValueError,
+        DecompressionBombError,
+    ) as exc:
         logger.warning(
             "downloaded image bytes are not decodable by PIL, skipping: "
-            f"url={url}, error={type(exc).__name__}, detail={exc}"
+            f"url={_safe_public_url(url)}, error={type(exc).__name__}, detail={exc}"
         )
         return None
 
@@ -1334,7 +1342,7 @@ def _download_image_file(url: str, material_directory: str = "") -> str | None:
 
 
 def _resolve_image_clip_duration(
-    clip_durations: list[int] | None,
+    clip_durations: list[float] | None,
     index: int,
 ) -> int:
     """
@@ -1357,7 +1365,7 @@ def download_selected_videos(
     task_id: str,
     materials: list[MaterialInfo],
     material_directory: str = "",
-    clip_durations: list[int] | None = None,
+    clip_durations: list[float] | None = None,
 ) -> list[str]:
     """
     Baixa exatamente as URLs fornecidas, na ordem dada, sem busca.

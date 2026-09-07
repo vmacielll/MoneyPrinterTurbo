@@ -584,6 +584,15 @@
     "Paragraph N Label": "第 {index} 段",
     "Video Option N": "视频 {index}",
     "Selected Video For Paragraph": "已选择：视频 {index}（{duration}秒）",
-    "Per Paragraph Script Changed": "脚本自上次搜索后已更改。请重新运行逐段搜索以刷新视频选择。"
+    "Per Paragraph Script Changed": "脚本自上次搜索后已更改。请重新运行逐段搜索以刷新视频选择。",
+    "Search Materials Per Paragraph": "按段搜索素材",
+    "Searching Materials Per Paragraph": "正在为每段搜索素材...",
+    "Media Type": "素材类型",
+    "Media Tab Videos": "视频",
+    "Media Tab Images": "图片",
+    "Image Label": "图片",
+    "No Images Found For Term": "未找到关键词对应的图片：{term}",
+    "Selected Image For Paragraph": "已选择：图片 {index}",
+    "Image Photographer Credit": "📷 {creator}"
   }
 }
