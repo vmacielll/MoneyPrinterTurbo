@@ -7010,6 +7010,9 @@ def _render_generation_controls(
                     _m.provider = "pexels"
                     _m.url = _chosen.url
                     _m.duration = _chosen.duration
+                    # Preserve media type so the pipeline routes image picks
+                    # to render_image_zoom_video instead of save_video.
+                    _m.material_type = _chosen.material_type
                     _m.source_info = _chosen.source_info
                     _selected.append(_m)
                 params.selected_materials = _selected
