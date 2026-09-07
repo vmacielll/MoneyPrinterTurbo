@@ -644,10 +644,50 @@ def get_video_materials(
 ):
     if params.selected_materials and params.video_source == "pexels":
         logger.info("\n\n## downloading user-selected videos")
+        # Imagens precisam da duração do parágrafo (não têm duração nativa) para
+        # serem renderizadas com o mesmo tempo do áudio do narrador. Calculamos
+        # os spans aqui — antes do download — reaproveitando o subtitle_path já
+        # gerado pela etapa anterior. Em fallback (sem cues) ainda devolvemos
+        # uma lista alinhada por parágrafo para preservar a invariante 1:1.
+        clip_durations = None
+        # Mesma convenção de path usada em generate_subtitle (linha 582) e em
+        # combine_videos mais adiante; o arquivo já existe quando esta função é
+        # chamada porque generate_subtitle roda antes de get_video_materials.
+        subtitle_path = path.join(utils.task_dir(task_id), "subtitle.srt")
+        if (
+            subtitle_path
+            and path.isfile(subtitle_path)
+            and params.video_script
+        ):
+            try:
+                cues = subtitle.parse_subtitle_cues(subtitle_path)
+                spans = paragraph_timing.paragraph_durations(
+                    params.video_script, cues, audio_duration
+                )
+                clip_durations = [max(1, int(round(end - start))) for start, end in spans]
+            except Exception as exc:
+                logger.warning(
+                    f"failed to derive paragraph durations for selected materials: "
+                    f"error={type(exc).__name__}, detail={exc}"
+                )
+                clip_durations = None
+        if (
+            clip_durations is not None
+            and len(clip_durations) != len(params.selected_materials)
+        ):
+            # 段落数和素材数不一致时回退为 None，让 download_selected_videos
+            # 走默认值；下载阶段仍会校验 1:1，失败的素材会让任务整体失败。
+            logger.warning(
+                "paragraph durations length does not match selected_materials; "
+                f"using default clip duration for any image material: "
+                f"durations={len(clip_durations)}, materials={len(params.selected_materials)}"
+            )
+            clip_durations = None
         video_paths = material.download_selected_videos(
             task_id=task_id,
             materials=params.selected_materials,
             material_directory="",
+            clip_durations=clip_durations,
         )
         if len(video_paths) != len(params.selected_materials):
             # 部分下载失败时跳过缺失项会把后续素材整体前移，破坏 clip_durations

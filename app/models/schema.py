@@ -82,6 +82,10 @@ class MaterialInfo:
     provider: str = "pexels"
     url: str = ""
     duration: int = 0
+    # "video" (default) ou "image". 图片没有原生时长，duration 保持 0；下载/渲染阶段
+    # 会按当前段落的音频时长合成 mp4 片段。旧任务文件没有这个字段时反序列化也回落到
+    # "video"，不会改变既有选择项的行为。
+    material_type: str = "video"
     # 在线素材搜索会附带经过筛选的公开来源信息，供搜索缓存和任务记录复用。
     # 本地上传素材不需要填写；写入任务文件前仍会按字段白名单重新构造，
     # 避免外部请求传入的签名 URL、凭据或无关字段进入持久化数据。
