@@ -4918,7 +4918,9 @@ def _search_pexels_for_paragraphs(paragraphs, terms, video_aspect):
                 "paragraph": paragraph,
                 "term": term,
                 "options": list(options or []),
-                # No preselection: force the user to curate each paragraph.
+                # Default media tab is video; the user can flip a paragraph to
+                # images in the picker. No preselection: force curation.
+                "media_tab": "video",
                 "chosen_index": -1,
             }
         )
@@ -4935,7 +4937,7 @@ def _render_per_paragraph_selection(params):
         return
 
     if st.button(
-        tr("Search Videos Per Paragraph"),
+        tr("Search Materials Per Paragraph"),
         key="search_videos_per_paragraph",
         use_container_width=True,
         type="secondary",
@@ -4946,7 +4948,7 @@ def _render_per_paragraph_selection(params):
             st.toast(tr("Please Enter the Video Subject"))
             st.warning(tr("Please Enter the Video Subject"))
         else:
-            with st.spinner(tr("Searching Videos Per Paragraph")):
+            with st.spinner(tr("Searching Materials Per Paragraph")):
                 terms = _run_llm_read_operation(
                     "generate_terms_per_paragraph",
                     lambda app_config_snapshot: llm.generate_terms(
@@ -5019,6 +5021,61 @@ def _render_per_paragraph_selection(params):
                     )
                 )
 
+            # Per-paragraph media tab (video vs image). When the user flips
+            # the segmented control we re-search that paragraph with the
+            # current term and reset the chosen_index (no carry-over between
+            # media types).
+            current_tab = stable_segmented_control(
+                tr("Media Type"),
+                options=["video", "image"],
+                default_value=entry.get("media_tab", "video"),
+                key=f"per_paragraph_media_tab_{idx}",
+                format_func=lambda v: (
+                    tr("Media Tab Videos")
+                    if v == "video"
+                    else tr("Media Tab Images")
+                ),
+                label_visibility="collapsed",
+            )
+            if current_tab != entry.get("media_tab"):
+                entry["media_tab"] = current_tab
+                entry["chosen_index"] = -1
+                _aspect_enum = (
+                    params.video_aspect
+                    if isinstance(params.video_aspect, VideoAspect)
+                    else VideoAspect(params.video_aspect)
+                )
+                _search_term = entry["term"]
+                with st.spinner(tr("Searching Materials Per Paragraph")):
+                    if current_tab == "video":
+                        try:
+                            fresh = material.search_videos_pexels(
+                                search_term=_search_term,
+                                minimum_duration=0,
+                                video_aspect=_aspect_enum,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                f"per-paragraph pexels video search failed: "
+                                f"term={_search_term!r}, {exc}"
+                            )
+                            fresh = []
+                    else:
+                        try:
+                            fresh = material.search_images_pexels(
+                                search_term=_search_term,
+                                video_aspect=_aspect_enum,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                f"per-paragraph pexels image search failed: "
+                                f"term={_search_term!r}, {exc}"
+                            )
+                            fresh = []
+                entry["options"] = list(fresh or [])
+                st.session_state["per_paragraph_selection"] = selection
+                st.rerun()
+
             # Editable term; re-search on demand.
             current_term = st.text_input(
                 tr("Paragraph Term").format(index=idx + 1),
@@ -5039,11 +5096,17 @@ def _render_per_paragraph_selection(params):
                         if isinstance(params.video_aspect, VideoAspect)
                         else VideoAspect(params.video_aspect)
                     )
-                    fresh = material.search_videos_pexels(
-                        search_term=current_term,
-                        minimum_duration=0,
-                        video_aspect=_aspect_enum,
-                    )
+                    if entry.get("media_tab", "video") == "image":
+                        fresh = material.search_images_pexels(
+                            search_term=current_term,
+                            video_aspect=_aspect_enum,
+                        )
+                    else:
+                        fresh = material.search_videos_pexels(
+                            search_term=current_term,
+                            minimum_duration=0,
+                            video_aspect=_aspect_enum,
+                        )
                 except Exception as exc:
                     logger.warning(
                         f"per-paragraph pexels refresh failed: term={current_term!r}, {exc}"
@@ -5062,19 +5125,25 @@ def _render_per_paragraph_selection(params):
 
             options = entry["options"]
             if not options:
-                st.warning(
-                    tr("No Videos Found For Term").format(term=entry["term"])
-                )
+                if entry.get("media_tab", "video") == "image":
+                    st.warning(
+                        tr("No Images Found For Term").format(term=entry["term"])
+                    )
+                else:
+                    st.warning(
+                        tr("No Videos Found For Term").format(term=entry["term"])
+                    )
                 entry["chosen_index"] = -1
                 st.session_state["per_paragraph_selection"] = selection
                 continue
 
-            # Clickable thumbnail cards: one card per option, with the video
-            # duration printed right under the thumbnail and a full-width
+            # Clickable thumbnail cards: one card per option, with the option
+            # caption printed right under the thumbnail and a full-width
             # select button acting as the card's action. Native Streamlit has
             # no stable image-click widget, so the button is the interactive
             # (and harness-testable) way to pick an option; the selected card
             # shows a checkmark badge and turns into a primary button.
+            is_image_tab = entry.get("media_tab", "video") == "image"
             cols_per_row = 4
             for row_start in range(0, len(options), cols_per_row):
                 row_options = options[row_start : row_start + cols_per_row]
@@ -5089,14 +5158,38 @@ def _render_per_paragraph_selection(params):
                         thumbnail = (option.source_info or {}).get("thumbnail")
                         if thumbnail:
                             st.image(thumbnail, use_container_width=True)
-                        st.caption(tr("Video Duration").format(duration=option.duration))
-                        if is_chosen:
-                            st.caption(
-                                tr("Selected Video For Paragraph").format(
-                                    index=opt_index + 1,
-                                    duration=option.duration,
-                                )
+                        # Image cards: photographer credit (Pexels ToS) + Image
+                        # label. Video cards: just the duration caption.
+                        if is_image_tab:
+                            creator = (option.source_info or {}).get("creator") or {}
+                            creator_name = (
+                                creator.get("name") if isinstance(creator, dict) else None
                             )
+                            if creator_name:
+                                st.caption(
+                                    tr("Image Photographer Credit").format(
+                                        creator=creator_name
+                                    )
+                                )
+                            st.caption(tr("Image Label"))
+                        else:
+                            st.caption(
+                                tr("Video Duration").format(duration=option.duration)
+                            )
+                        if is_chosen:
+                            if is_image_tab:
+                                st.caption(
+                                    tr("Selected Image For Paragraph").format(
+                                        index=opt_index + 1,
+                                    )
+                                )
+                            else:
+                                st.caption(
+                                    tr("Selected Video For Paragraph").format(
+                                        index=opt_index + 1,
+                                        duration=option.duration,
+                                    )
+                                )
                         if st.button(
                             (
                                 tr("Video Selected Button")

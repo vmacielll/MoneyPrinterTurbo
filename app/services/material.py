@@ -392,6 +392,140 @@ def search_videos_pexels(
     return []
 
 
+# 与视频搜索共用同一浏览器 UA，降低被 CDN 风控的概率。
+_PEXELS_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+)
+# Pexels 图片没有视频那样固定的像素分辨率，只能按宽高比做容差匹配。
+# 10% 的容差带既允许接近目标画幅的构图（如 3:4、5:4），又不会放行明显
+# 错向的素材。目标比例取视频画幅的宽高比：portrait 9:16、landscape 16:9、
+# square 1:1。
+_PHOTO_ASPECT_TOLERANCE = 0.1
+_PHOTO_ASPECT_RATIOS = {
+    VideoAspect.portrait: 9 / 16,
+    VideoAspect.landscape: 16 / 9,
+    VideoAspect.square: 1.0,
+}
+# 丢弃低于该最小边长的低清缩略图，与 video._MIN_MATERIAL_DIMENSION 保持
+# 同一阈值，避免明显低清的素材进入成片。
+_MIN_PHOTO_DIMENSION = 480
+
+
+def _matches_photo_aspect(
+    width: Any,
+    height: Any,
+    video_aspect: VideoAspect,
+) -> bool:
+    """
+    判断图片宽高比是否落在目标画幅的容差带内。
+
+    与 ``_matches_video_aspect`` 的严格方向判断不同，图片没有统一分辨率，
+    这里按 9:16 / 16:9 / 1:1 的目标宽高比做百分比容差匹配。无法确认尺寸
+    的条目直接返回 False。
+    """
+    try:
+        normalized_width = int(float(width))
+        normalized_height = int(float(height))
+    except (TypeError, ValueError):
+        return False
+    if normalized_width <= 0 or normalized_height <= 0:
+        return False
+    aspect = VideoAspect(video_aspect)
+    target = _PHOTO_ASPECT_RATIOS[aspect]
+    ratio = normalized_width / normalized_height
+    return abs(ratio - target) <= target * _PHOTO_ASPECT_TOLERANCE
+
+
+def search_images_pexels(
+    search_term: str,
+    video_aspect: VideoAspect = VideoAspect.portrait,
+) -> List[MaterialInfo]:
+    """
+    用 Pexels 图片搜索接口按关键词检索图片素材。
+
+    图片没有视频那样统一的像素分辨率，因此不做精确尺寸匹配，而是按目标
+    画幅的宽高比容差带过滤（见 ``_matches_photo_aspect``），并丢弃低于
+    最小边长的低清缩略图。请求失败、响应异常或缺少 ``photos`` 键时按素材
+    源约定返回空列表，由上层跳过该关键词继续。
+    """
+    aspect = VideoAspect(video_aspect)
+    video_orientation = aspect.name
+    api_key = get_api_key("pexels_api_keys")
+    headers = {
+        "Authorization": api_key,
+        "User-Agent": _PEXELS_USER_AGENT,
+    }
+    # Build URL
+    params = {"query": search_term, "per_page": 20, "orientation": video_orientation}
+    query_url = f"https://api.pexels.com/v1/search?{urlencode(params)}"
+    logger.info(f"searching images on pexels: term={search_term!r}")
+
+    try:
+        r = requests.get(
+            query_url,
+            headers=headers,
+            proxies=config.proxy,
+            verify=_get_tls_verify(),
+            timeout=(30, 60),
+        )
+        response = r.json()
+        image_items: List[MaterialInfo] = []
+        if not isinstance(response, dict) or "photos" not in response:
+            logger.error("pexels image search returned an unsupported response")
+            return image_items
+        photos = response["photos"]
+        # loop through each photo in the result
+        for p in photos:
+            try:
+                width = int(float(p.get("width")))
+                height = int(float(p.get("height")))
+            except (TypeError, ValueError):
+                continue
+            if width < _MIN_PHOTO_DIMENSION or height < _MIN_PHOTO_DIMENSION:
+                continue
+            if not _matches_photo_aspect(width, height, aspect):
+                continue
+            src = p.get("src") if isinstance(p.get("src"), dict) else {}
+            image_url = src.get("large2x")
+            if not image_url:
+                continue
+            item = MaterialInfo()
+            item.provider = "pexels"
+            item.url = image_url
+            item.duration = 0
+            item.material_type = "image"
+            item.source_info = {
+                "provider": "pexels",
+                "search_term": search_term,
+                "asset_id": (
+                    str(p.get("id")) if p.get("id") is not None else None
+                ),
+                "source_page": _safe_public_url(p.get("url")),
+                "thumbnail": _safe_public_url(src.get("medium")),
+                "creator": _creator_info(
+                    {
+                        "name": p.get("photographer"),
+                        "url": p.get("photographer_url"),
+                    }
+                ),
+                "rendition": {
+                    "id": None,
+                    "width": width,
+                    "height": height,
+                },
+            }
+            image_items.append(item)
+        return image_items
+    except Exception as e:
+        logger.error(
+            "pexels image search failed: "
+            f"error={type(e).__name__}, detail={_redact_request_error(e, api_key)}"
+        )
+
+    return []
+
+
 def search_videos_pixabay(
     search_term: str,
     minimum_duration: int,
@@ -1093,17 +1227,174 @@ def save_video(video_url: str, save_dir: str = "") -> str:
     return ""
 
 
+_IMAGE_EXTENSION_BY_CONTENT_TYPE = {
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/png": ".png",
+}
+# 调用方未传 clip_durations 时图片片段的默认时长（秒）。
+_DEFAULT_IMAGE_CLIP_DURATION = 5
+
+
+def _image_extension_for_content_type(content_type: str) -> str:
+    """
+    根据响应 Content-Type 决定图片文件扩展名，未知类型回退 .img。
+    """
+    normalized = str(content_type or "").split(";")[0].strip().lower()
+    return _IMAGE_EXTENSION_BY_CONTENT_TYPE.get(normalized, ".img")
+
+
+def _download_image_file(url: str, material_directory: str = "") -> str | None:
+    """
+    下载单张图片到素材目录，返回绝对路径；失败返回 None。
+
+    与搜索请求共用代理和 TLS 校验配置。落盘前先用 PIL 校验字节能否解码，
+    防止 CDN 或网关把 HTML 错误页伪装成图片存进素材目录。文件名由 URL
+    哈希加 Content-Type 扩展名组成，重复下载同一 URL 会复用已存在文件。
+    这里只负责落盘，不做 mp4 渲染——渲染是调用方（download_selected_videos
+    等）的职责。
+    """
+    if not material_directory:
+        material_directory = utils.storage_dir("cache_images", create=True)
+    elif not os.path.isdir(material_directory):
+        try:
+            os.makedirs(material_directory, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "failed to create image material directory: "
+                f"directory={material_directory}, "
+                f"error={type(exc).__name__}, detail={exc}"
+            )
+            return None
+
+    headers = {"User-Agent": _PEXELS_USER_AGENT}
+    try:
+        response = requests.get(
+            url,
+            stream=True,
+            headers=headers,
+            proxies=config.proxy,
+            verify=_get_tls_verify(),
+            timeout=(30, 60),
+        )
+        status_code = int(getattr(response, "status_code", 200) or 200)
+        if status_code < 200 or status_code >= 300:
+            logger.warning(
+                "failed to download image material: "
+                f"url={_safe_public_url(url)}, status={status_code}"
+            )
+            return None
+        content = getattr(response, "content", b"")
+        if not content:
+            logger.warning(
+                f"image material download returned an empty body: url={url}"
+            )
+            return None
+    except Exception as e:
+        logger.warning(
+            "failed to download image material: "
+            f"error={type(e).__name__}, detail={_redact_request_error(e, url)}"
+        )
+        return None
+
+    # 字节必须先能被 PIL 解码，才能落盘。伪装成图片的 HTML 错误页、截断的
+    # 下载内容都会在这里被拦截并返回 None，由调用方按素材源约定跳过。
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            image.load()
+    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as exc:
+        logger.warning(
+            "downloaded image bytes are not decodable by PIL, skipping: "
+            f"url={url}, error={type(exc).__name__}, detail={exc}"
+        )
+        return None
+
+    raw_headers = getattr(response, "headers", None) or {}
+    headers_lower = {
+        str(key).lower(): str(value) for key, value in raw_headers.items()
+    }
+    extension = _image_extension_for_content_type(
+        headers_lower.get("content-type", "")
+    )
+    url_hash = utils.md5(url)
+    image_path = os.path.join(material_directory, f"pexels-{url_hash}{extension}")
+
+    if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+        return image_path
+    try:
+        with open(image_path, "wb") as f:
+            f.write(content)
+    except OSError as exc:
+        logger.warning(
+            "failed to save image material: "
+            f"path={image_path}, error={type(exc).__name__}, detail={exc}"
+        )
+        return None
+    return image_path
+
+
+def _resolve_image_clip_duration(
+    clip_durations: list[int] | None,
+    index: int,
+) -> int:
+    """
+    解析图片素材的片段时长。
+
+    调用方负责传递与段落 1:1 对齐的 clip_durations；缺失或越界时回退到
+    默认 5 秒，保证渲染仍能进行（时长不精确由调用方负责对齐）。
+    """
+    if clip_durations is not None and index < len(clip_durations):
+        try:
+            duration = int(clip_durations[index])
+        except (TypeError, ValueError):
+            duration = 0
+        if duration > 0:
+            return duration
+    return _DEFAULT_IMAGE_CLIP_DURATION
+
+
 def download_selected_videos(
     task_id: str,
     materials: list[MaterialInfo],
     material_directory: str = "",
+    clip_durations: list[int] | None = None,
 ) -> list[str]:
-    """Baixa exatamente as URLs fornecidas, na ordem dada, sem busca."""
+    """
+    Baixa exatamente as URLs fornecidas, na ordem dada, sem busca.
+
+    Itens com ``material_type == "image"`` são baixados por
+    ``_download_image_file`` e renderizados em mp4 via
+    ``render_image_zoom_video`` usando ``clip_durations[i]`` (ou 5s quando
+    a lista não é informada); os demais itens seguem o caminho de vídeo
+    ``save_video``. A invariante 1:1 permanece: qualquer falha de download
+    ou renderização faz o item ficar de fora de ``video_paths``, e o caller
+    detecta a divergência de contagem.
+    """
     video_paths: list[str] = []
     material_sources: list[dict[str, Any]] = []
-    for item in materials:
+    for i, item in enumerate(materials):
         try:
-            saved_video_path = save_video(item.url, material_directory)
+            if item.material_type == "image":
+                image_path = _download_image_file(item.url, material_directory)
+                if not image_path:
+                    logger.warning(
+                        "failed to download selected image material: "
+                        f"provider={item.provider}, "
+                        f"url={_safe_public_url(item.url)}"
+                    )
+                    continue
+                clip_duration = _resolve_image_clip_duration(clip_durations, i)
+                if clip_durations is None:
+                    logger.warning(
+                        "image material rendered with default clip duration: "
+                        f"provider={item.provider}, clip_duration={clip_duration}. "
+                        "Pass clip_durations for accurate per-paragraph timing."
+                    )
+                saved_video_path = video.render_image_zoom_video(
+                    image_path, clip_duration=clip_duration
+                )
+            else:
+                saved_video_path = save_video(item.url, material_directory)
             if saved_video_path:
                 video_paths.append(saved_video_path)
                 try:

@@ -153,6 +153,15 @@ ENGLISH_FALLBACK_KEYS = frozenset(
         "Video Duration",
         "Estimated Paragraph Duration",
         "Per Paragraph Script Changed",
+        "Search Materials Per Paragraph",
+        "Searching Materials Per Paragraph",
+        "Media Type",
+        "Media Tab Videos",
+        "Media Tab Images",
+        "Image Label",
+        "No Images Found For Term",
+        "Selected Image For Paragraph",
+        "Image Photographer Credit",
     }
 )
 FORMAT_PLACEHOLDER_PATTERN = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})")
