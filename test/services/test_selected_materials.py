@@ -16,3 +16,17 @@ def test_video_params_accepts_selected_materials():
 def test_selected_materials_defaults_to_none():
     p = VideoParams(video_subject="test")
     assert p.selected_materials is None
+
+
+def test_material_info_defaults_to_video():
+    item = MaterialInfo(provider="pexels", url="https://example.com/a.mp4", duration=5)
+    assert item.material_type == "video"
+
+
+def test_material_info_accepts_image_type():
+    item = MaterialInfo(
+        provider="pexels",
+        url="https://example.com/a.jpg",
+        material_type="image",
+    )
+    assert item.material_type == "image"

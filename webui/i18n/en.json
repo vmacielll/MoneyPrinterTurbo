@@ -494,6 +494,15 @@
     "Video Selected Button": "✓ Selected",
     "Video Duration": "{duration}s",
     "Estimated Paragraph Duration": "≈ {duration}s estimated",
-    "Per Paragraph Script Changed": "The script has changed since the last search. Please re-run the per-paragraph search to refresh video selections."
+    "Per Paragraph Script Changed": "The script has changed since the last search. Please re-run the per-paragraph search to refresh video selections.",
+    "Search Materials Per Paragraph": "Search Materials Per Paragraph",
+    "Searching Materials Per Paragraph": "Searching materials for each paragraph...",
+    "Media Type": "Media type",
+    "Media Tab Videos": "Videos",
+    "Media Tab Images": "Images",
+    "Image Label": "Image",
+    "No Images Found For Term": "No images found for term: {term}",
+    "Selected Image For Paragraph": "Selected: image {index}",
+    "Image Photographer Credit": "📷 {creator}"
   }
 }
